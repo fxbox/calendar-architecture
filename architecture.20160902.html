@@ -6,7 +6,7 @@
     <link rel='stylesheet', href='mozilla/styles/fonts.css'>
     <style>
       body {
-        background: url(mozilla/images/bg-sandstone-2.png) !important;
+        background: url(mozilla/images/bg-sandstone-2.png) center / cover !important;
       }
       .remark-slide-container {
         font: 25px/1.8 'Open Sans', sans-serif;
@@ -47,7 +47,6 @@
 class: center, middle
 
 # The architecture for the Voice Reminders app
-(press P to display the presenter notes)
 
 ---
 
@@ -75,12 +74,160 @@ layout: false
 Voice Reminders is an app to manage reminders using mainly a voice interface.
 
 Main features are:
-* 
+* Create reminders for oneself or other members of groups
+* Have an overview of the existing reminder always-on
+* Receive notifications on personal phones
+
+---
+
+## Bird-eye overview
+
+The application is split in 2 parts:
+* [the back-end part](https://github.com/fxbox/calendar) exposes a REST API to do all manipulations. It uses CORS to
+allow access from any page.
+* [the front-end](https://github.com/fxbox/calendar-server) is using this REST API to propose a consistent UX.
 
 ---
 template: title
 
-# Roadmap
+# Some words about the frontend
+
+---
+## The frontend
+
+The frontend is using [React](https://facebook.github.io/react/) as its rendering library.
+
+At the first launch the user enters a login form. He can enter an email and a
+password.
+
+If the credentials are correct the server returns a JSON Web Token containing
+the session informations. This Web Token is stored in localStorage.
+
+Next time the user connects the JWT is reused and the main view is rendered.
+
+---
+## A service worker
+
+The frontend installs a service worker to support offline and push
+notifications.
+
+We use the standard push notifications API. The data we get from the API are
+sent to the server where it's persisted to be used when it's needed.
+
+Push Notifications are used to remind the user about a ... reminder. :)
+
+---
+## Voice control
+
+There is a 2-step process:
+
+1. using a [Javascript build of pocketsphinx](http://syl22-00.github.io/pocketsphinx.js/) we locally listen for a wake word.
+2. when a wakeword is recognized, or when the user taps a button, we use
+Chrome's integrated Speech Recognition capability to conduct a speech to text
+conversion.
+
+We also use Chrome's Web Speech API to _speak_ text.
+
+This means some data actually goes out to Google's servers. We plan to replace
+some of this by other 3rd-party servers like Nuance.
+
+This also means this works in Chrome only.
+
+---
+template: title
+
+# Deep dive into the server-side
+
+---
+## Technologies
+
+We use these basic blocks:
+* NodeJS v6
+* [ExpressJS](http://expressjs.com/) with JWT and CORS plugins, + the body-parser JSON and urlencoded decoder
+* SQLite v3 with the node-sqlite3 client
+
+---
+## Overview
+
+The server-side is split in 3 main parts, 1 of them in a separate process.
+
+Process 1:
+* the main ExpressJS-based app
+* a cron-like that regularly checks whether a notification is due.
+
+Process 2:
+* Sends the notification through the push notification server.
+
+---
+template: title
+
+# The ExpressJS-based app
+
+---
+## Organization of the code
+
+* `dao`: contains database access code
+* `routes`: contains the HTTP routes and some simple business logic
+* `utils`: various utils we need in some places
+* `config`: contains a config template that you should copy, this is
+  read and handled by config.js; there are usually sensible
+  default values except for Google's key
+* `business`: higher complexity code; basically, our implicit
+  rule with Johan is that once the code in a route started to
+  be too complex, we moved it here.
+
+---
+## API
+
+The API is described in the [application's README
+file](https://github.com/fxbox/calendar-server/blob/master/README.md).
+
+[The API is being reworked](https://github.com/fxbox/calendar-server/pull/44/files) to permit more complex use cases.
+This is the API that is being described in this slidedeck.
+
+---
+## User registration
+
+POSTing to /users creates a new user. We pass email, password, forename and we
+return a user object with an id. The password is never returned (even in an
+hashed form).
+
+The password is hashed using Argon2 and stored in sqlite.
+
+In the future we want a 2-step user creation process where the user has to
+confirm the subscription, to prevent spam.
+
+---
+## Login process
+
+Email and passwords are sent as a JSON object. If authentication is successful
+we return a JSON Web Token. The JWT secret is configurable.
+
+Every API besides user registration and login needs this JWT to accept requests,
+passed in an `Authorization` header.
+
+---
+## Finding due notifications
+
+This is done using Node's `setInterval` mechanism. So it runs in the same event
+loop as the main ExpressJS app. It would be really easy to split it to its own
+process though.
+
+It sets up a [0mq](http://zeromq.org/) socket where notification requests are
+pushed.
+
+---
+## Sending notifications
+
+This is done in process 2. This process listens on the 0mq socket and reacts to
+new messages. It uses the stored information about push messages subscription to
+send a push message through the push server.
+
+---
+## Deployment
+
+The server is deployed on an AWS VM. We use pm2 to manage the application
+lifecycle.
 
 ---
 template: title
